@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/rabbit
+       http://www.springframework.org/schema/rabbit/spring-rabbit.xsd">
+
+    <!--定义过期队列及其属性，不存在则自动创建-->
+    <rabbit:queue id="my_ttl_queue" name="my_ttl_queue" auto-declare="true">
+        <rabbit:queue-arguments>
+            <!--投递到该队列的消息如果没有消费都将在6秒之后被删除-->
+            <entry key="x-message-ttl" value-type="long" value="6000"/>
+        </rabbit:queue-arguments>
+    </rabbit:queue>
+
+    <!--定义定向交换机中的持久化死信队列，不存在则自动创建-->
+    <rabbit:queue id="my_dlx_queue" name="my_dlx_queue" auto-declare="true"/>
+
+    <!--定义广播类型交换机；并绑定上述两个队列-->
+    <rabbit:direct-exchange id="my_dlx_exchange" name="my_dlx_exchange" auto-declare="true">
+        <rabbit:bindings>
+            <!--绑定路由键 my_ttl_dlx、my_max_dlx，可以将过期的消息转移到my_dlx_queue队列-->
+            <!--路由必须对应上-->
+            <rabbit:binding key="my_ttl_dlx" queue="my_dlx_queue"/>
+            <rabbit:binding key="my_max_dlx" queue="my_dlx_queue"/>
+        </rabbit:bindings>
+    </rabbit:direct-exchange>
+
+    <!--定义过期队列及其属性，不存在则自动创建-->
+    <rabbit:queue id="my_ttl_dlx_queue" name="my_ttl_dlx_queue" auto-declare="true">
+        <rabbit:queue-arguments>
+            <!--投递到该队列的消息如果没有消费都将在10秒之后被投递到死信交换机-->
+            <entry key="x-message-ttl" value-type="long" value="10000"/>
+            <!--设置当消息过期后投递到对应的死信交换机-->
+            <entry key="x-dead-letter-exchange" value="my_dlx_exchange"/>
+        </rabbit:queue-arguments>
+    </rabbit:queue>
+
+    <!--定义限制长度的队列及其属性，不存在则自动创建-->
+    <rabbit:queue id="my_max_dlx_queue" name="my_max_dlx_queue" auto-declare="true">
+        <rabbit:queue-arguments>
+            <!--投递到该队列的消息最多2个消息，如果超过则最早的消息被删除投递到死信交换机-->
+            <entry key="x-max-length" value-type="long" value="2"/>
+            <!--设置当消息过期后投递到对应的死信交换机-->
+            <entry key="x-dead-letter-exchange" value="my_dlx_exchange"/>
+        </rabbit:queue-arguments>
+    </rabbit:queue>
+
+    <!--定义定向交换机，根据不同的路由key投递消息-->
+    <rabbit:direct-exchange id="my_normal_exchange" name="my_normal_exchange" auto-declare="true">
+        <rabbit:bindings>
+            <rabbit:binding key="my_ttl_dlx" queue="my_ttl_dlx_queue"/>
+            <rabbit:binding key="my_max_dlx" queue="my_max_dlx_queue"/>
+        </rabbit:bindings>
+    </rabbit:direct-exchange>
+
+    <!--配合回调-->
+    <!--<rabbit:connection-factory id="connectionFactory" host="127.0.0.1"
+                               port="5672"
+                               username="guest"
+                               password="guest"
+                               virtual-host="/itcast"
+                               publisher-confirms="true"
+                               publisher-returns="true"/>-->
+
+
+    <!--消息处理回调类-->
+    <bean id="confirmCallback" class="com.cn.producer.MsgSendConfirmCallBack"/>
+    <!--消息发送失败回调类-->
+    <bean id="returnCallback" class="com.cn.producer.MsgSendReturnCallBack"/>
+    <!--confirm-callback="confirmCallback" 表示：消息失败回调-->
+    <!--需要配置mandatory="true"，否则消息会丢失-->
+    <!--channel-transacted="true" 表示事务支持
+    事务跟确认机制不能并存，因此配置了channel-transacted，就不能再配置confirm-callback和return-callback
+    -->
+    <!--配合回调-->
+    <!--<rabbit:template id="rabbitTemplate" connection-factory="connectionFactory"
+                     confirm-callback="confirmCallback"
+                     return-callback="returnCallback"
+                    mandatory="true"/>-->
+
+    <rabbit:queue id="spring-queue" name="spring-queue" auto-declare="true"/>
+
+
+    <!--事务配置-->
+    <rabbit:connection-factory id="connectionFactory" host="127.0.0.1"
+                               port="5672"
+                               username="guest"
+                               password="guest"
+                               virtual-host="/itcast"/>
+    <rabbit:template id="rabbitTemplate" connection-factory="connectionFactory"
+                     channel-transacted="true"
+                     mandatory="true"/>
+
+    <!--平台事务管理器-->
+    <bean id="transactionManager" class="org.springframework.amqp.rabbit.transaction.RabbitTransactionManager">
+        <property name="connectionFactory" ref="connectionFactory"/>
+    </bean>
+</beans>
